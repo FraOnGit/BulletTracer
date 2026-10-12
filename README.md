@@ -14,7 +14,7 @@ at long range.
 - **Use depth rendering**: lines hidden behind walls (on) or always visible on top (off).
 - **Infinite ammo** toggle, to practice without reloading. It turns off again when you untick it or load a new level.
 - Line color, a **Clear the lines** button, and an optional window that stays visible with the mod menu closed.
-- Works with FreeCam: you can pause the game while a dart is in the air and resume it, and the dart is still traced.
+- Works with FreeCam
 
 ## Requirements
 
