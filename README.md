@@ -63,7 +63,7 @@ The mod is built inside the ZHMModSDK source tree:
 
 - [ZHMModSDK](https://github.com/OrfeasZ/ZHMModSDK) by Orfeas Zafeiris. The infinite ammo follows the way the SDK's
   Player mod does it.
-- Made by Fra. The code was written with Claude Code (Anthropic's Claude Opus 5.5), with the game's internals
+- Made by Fra47. The code was written with Claude Code ( Opus 5.5), with the game's internals
   studied in Ghidra and checked in game.
 
 ## License
