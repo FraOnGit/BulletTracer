@@ -3,7 +3,7 @@
 A [ZHMModSDK](https://github.com/OrfeasZ/ZHMModSDK) mod for **HITMAN World of Assassination** that draws a 3D line
 along the path of every shot.
 
-Darts (Sieker, tranquilizer pistol and the like) are not instant hits: they are real projectiles that fly at about
+Darts (Sieker, tranquilizer pistol and the like) are real projectiles that fly at about
 50 m/s and drop with distance. Bullet Tracer shows exactly where they went, so you can see the arc and learn to aim
 at long range.
 
