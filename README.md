@@ -12,7 +12,7 @@ at long range.
 - A permanent line for every dart fired, until you clear it.
 - **Trace all shots**: off (default) draws only darts; on draws every shot the game fires as a projectile.
 - **Use depth rendering**: lines hidden behind walls (on) or always visible on top (off).
-- **Infinite ammo** toggle, to practice without reloading. It turns off again when you untick it or load a new level.
+- **Infinite ammo** toggle, to practice without reloading. It turns off again when you untick it, restart the mission or load a new level.
 - Line color, a **Clear the lines** button, and an optional window that stays visible with the mod menu closed.
 - Works with FreeCam
 

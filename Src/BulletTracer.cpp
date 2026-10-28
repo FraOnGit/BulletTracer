@@ -21,7 +21,7 @@
 #include <cmath>
 
 namespace {
-constexpr const char* kVersion = "1.0.0";
+constexpr const char* kVersion = "1.0.1";
 
 // Addresses as Ghidra saw them; Windows loads the game elsewhere, so they are shifted at runtime.
 constexpr uintptr_t kGhidraImageBase = 0x140000000;
@@ -160,6 +160,10 @@ void BulletTracer::ProjectileSetUp(void* p_This, void* p_Params) {
 void BulletTracer::OnFrameUpdate(const SGameUpdateEvent& p_UpdateEvent) {
     const float s_Delta = static_cast<float>(p_UpdateEvent.m_GameTimeDelta.ToSeconds());
 
+    // Read here, on the game's own update, for the window to show.
+    const auto s_Hitman = SDK()->GetLocalPlayer();
+    m_HitmanInfiniteAmmo = s_Hitman && s_Hitman.m_pInterfaceRef->IsInfiniteAmmoEnabled();
+
     if (!m_Enabled) {
         std::scoped_lock s_Lock(m_Mutex);
         m_NewProjectiles.clear();
@@ -292,7 +296,11 @@ void BulletTracer::OnDrawUI(bool p_HasFocus) {
 
         // Only on a click, with the level loaded, as the Player mod does it: never saved, and off again on
         // the next level. Making it at load time, as soon as 47 exists, took the game down.
-        if (ImGui::Checkbox("Infinite ammo", &m_InfiniteAmmo)) {
+        // The tick shows what the game says too: ammo left infinite by something else can be turned off here.
+        bool s_InfiniteAmmo = m_InfiniteAmmo || m_HitmanInfiniteAmmo;
+
+        if (ImGui::Checkbox("Infinite ammo", &s_InfiniteAmmo)) {
+            m_InfiniteAmmo = s_InfiniteAmmo;
             SetInfiniteAmmo();
 
             if (m_InfiniteAmmo && !m_CrippleBoxEntity) {
@@ -361,55 +369,36 @@ void BulletTracer::DrawTraces(IRenderer* p_Renderer) {
     }
 }
 
-// A cripple box with limited ammo turned off, as the Player mod does it, created when the box is ticked.
-// Unticking deactivates it before deleting it: the game recomputes 47's abilities only when a box is
-// activated or deactivated (Ghidra: ZHM5CrippleBox slots 6 and 7), and its destructor just takes it off
-// the list, so deleting it alone left the ammo infinite until the game was closed.
+// Infinite ammo is a cripple box with limited ammo turned off, as the Player mod makes it. The game keeps
+// its cripple boxes on a list and recomputes 47's abilities from that list only when a box is activated or
+// deactivated (Ghidra: ZHM5CrippleBox slots 6 and 7, recompute at 0x1403e39b0). A box's destructor just
+// takes it off the list, so a box deleted without Deactivate first, by hand or by the level ending, leaves
+// the ammo infinite until the game is closed: that is why the box is always deactivated here before it goes.
 void BulletTracer::SetInfiniteAmmo() {
-    if (!m_InfiniteAmmo) {
-        if (m_CrippleBoxEntity) {
-            if (auto* s_CrippleBox = m_CrippleBoxEntity.QueryInterface<ZHM5CrippleBox>()) {
-                s_CrippleBox->Deactivate(0);
-            }
-
-            Functions::ZEntityManager_DeleteEntity->Call(Globals::EntityManager, m_CrippleBoxEntity, {});
-            m_CrippleBoxEntity = {};
-        }
-
-        return;
-    }
-
     auto s_Hitman = SDK()->GetLocalPlayer();
 
-    if (!s_Hitman) {
+    if (!m_InfiniteAmmo) {
+        RemoveCrippleBox();
+
+        // Still infinite, with no box of ours: left so by a box deleted without Deactivate (version 1.0.0
+        // on a level restart, or another mod). A box switched on and off makes the game recompute the
+        // ammo from the boxes that are left, which brings it back to normal.
+        if (s_Hitman && s_Hitman.m_pInterfaceRef->IsInfiniteAmmoEnabled() && CreateCrippleBox()) {
+            if (auto* s_CrippleBox = m_CrippleBoxEntity.QueryInterface<ZHM5CrippleBox>()) {
+                s_CrippleBox->m_bActivateOnStart = true;
+                s_CrippleBox->m_rHitmanCharacter = s_Hitman;
+                s_CrippleBox->m_bLimitedAmmo = true;
+                s_CrippleBox->Activate(0);
+            }
+
+            RemoveCrippleBox();
+        }
+
         return;
     }
 
-    if (!m_CrippleBoxEntity) {
-        const auto s_Scene = Globals::Hitman5Module->m_pEntitySceneContext->m_pScene;
-
-        if (!s_Scene) {
-            return;
-        }
-
-        constexpr auto s_CrippleBoxId = ResId<"[modules:/zhm5cripplebox.class].pc_entitytype">;
-
-        TResourcePtr<ZTemplateEntityFactory> s_Factory;
-        Globals::ResourceManager->GetResourcePtr(s_Factory, s_CrippleBoxId, 0);
-
-        if (!s_Factory) {
-            return;
-        }
-
-        SExternalReferences s_ExternalRefs;
-
-        Functions::ZEntityManager_NewEntity->Call(
-            Globals::EntityManager, m_CrippleBoxEntity, "", s_Factory, s_Scene.m_entityRef, s_ExternalRefs, -1
-        );
-
-        if (!m_CrippleBoxEntity) {
-            return;
-        }
+    if (!s_Hitman || (!m_CrippleBoxEntity && !CreateCrippleBox())) {
+        return;
     }
 
     auto* s_CrippleBox = m_CrippleBoxEntity.QueryInterface<ZHM5CrippleBox>();
@@ -424,14 +413,56 @@ void BulletTracer::SetInfiniteAmmo() {
     s_CrippleBox->Activate(0);
 }
 
-// A new scene: the old lines belong to a place that is gone, and the cripple box went with it, so
-// infinite ammo is off again.
+bool BulletTracer::CreateCrippleBox() {
+    const auto s_Scene = Globals::Hitman5Module->m_pEntitySceneContext->m_pScene;
+
+    if (!s_Scene) {
+        return false;
+    }
+
+    constexpr auto s_CrippleBoxId = ResId<"[modules:/zhm5cripplebox.class].pc_entitytype">;
+
+    TResourcePtr<ZTemplateEntityFactory> s_Factory;
+    Globals::ResourceManager->GetResourcePtr(s_Factory, s_CrippleBoxId, 0);
+
+    if (!s_Factory) {
+        return false;
+    }
+
+    SExternalReferences s_ExternalRefs;
+
+    Functions::ZEntityManager_NewEntity->Call(
+        Globals::EntityManager, m_CrippleBoxEntity, "", s_Factory, s_Scene.m_entityRef, s_ExternalRefs, -1
+    );
+
+    return static_cast<bool>(m_CrippleBoxEntity);
+}
+
+// Deactivate first, so that the game recomputes the ammo without this box; then delete it.
+void BulletTracer::RemoveCrippleBox() {
+    if (!m_CrippleBoxEntity) {
+        return;
+    }
+
+    if (auto* s_CrippleBox = m_CrippleBoxEntity.QueryInterface<ZHM5CrippleBox>()) {
+        s_CrippleBox->Deactivate(0);
+    }
+
+    Functions::ZEntityManager_DeleteEntity->Call(Globals::EntityManager, m_CrippleBoxEntity, {});
+    m_CrippleBoxEntity = {};
+}
+
+// A new scene (another level, or the same one restarted): the old lines belong to a place that is gone.
+// The box is switched off here, while 47 and the scene are still there: left to the scene, it would be
+// deleted without Deactivate and the ammo would stay infinite.
 DEFINE_PLUGIN_DETOUR(BulletTracer, void, OnClearScene, ZEntitySceneContext* th, bool p_FullyUnloadScene) {
+    RemoveCrippleBox();
+    m_InfiniteAmmo = false;
+    m_HitmanInfiniteAmmo = false;
+
     std::scoped_lock s_Lock(m_Mutex);
     m_Traces.clear();
     m_NewProjectiles.clear();
-    m_CrippleBoxEntity = {};
-    m_InfiniteAmmo = false;
 
     return HookResult<void>(HookAction::Continue());
 }

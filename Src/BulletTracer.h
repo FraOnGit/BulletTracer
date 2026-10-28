@@ -55,6 +55,8 @@ private:
     void UpdateTraces(float p_Delta);
     void DrawTraces(IRenderer* p_Renderer);
     void SetInfiniteAmmo();
+    bool CreateCrippleBox();
+    void RemoveCrippleBox();
     void Classify(Trace& p_Trace, bool p_Final);
 
     static void ProjectileSetUp(void* p_This, void* p_Params);
@@ -84,6 +86,7 @@ private:
 
     // Infinite ammo, as the Player mod does it.
     ZEntityRef m_CrippleBoxEntity;
+    bool m_HitmanInfiniteAmmo = false; // What the game says now, read on each frame update.
 };
 
 DECLARE_ZHM_PLUGIN(BulletTracer)
