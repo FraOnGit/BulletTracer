@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.2
+
+- Works with the game update 3.290.1 and ZHMModSDK 4.2.1. The update moved the game code the mod hooks, so 1.0.1
+  stayed off ("Not active") on the new version.
+- The DLL no longer contains the folder it was built in.
+
 ## 1.0.1
 
 - Fixed: restarting the mission with infinite ammo on left the ammo infinite, with no way to turn it off.

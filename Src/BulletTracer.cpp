@@ -21,15 +21,15 @@
 #include <cmath>
 
 namespace {
-constexpr const char* kVersion = "1.0.1";
+constexpr const char* kVersion = "1.0.2";
 
 // Addresses as Ghidra saw them; Windows loads the game elsewhere, so they are shifted at runtime.
 constexpr uintptr_t kGhidraImageBase = 0x140000000;
 
 // ZHM5Projectile: the interface whose slot 25 sets a new shot up, and the method that is there.
-constexpr uintptr_t kProjectileVTable = 0x141e1f6a0;
+constexpr uintptr_t kProjectileVTable = 0x141e3adc0;
 constexpr int kSetUpSlot = 25;
-constexpr uintptr_t kSetUpFunction = 0x1406ebca0;
+constexpr uintptr_t kSetUpFunction = 0x1406e3ba0;
 
 // Where the projectile is now, measured in flight: +0xf8 of that interface (+0xe4, the translation of
 // its starting matrix at +0xc0, stays where the shot left the gun).

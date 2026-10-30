@@ -19,3 +19,7 @@ target_include_directories(BulletTracer PRIVATE
 target_link_libraries(BulletTracer PRIVATE
         ZHMModSDK
 )
+
+
+# Only the file name of the .pdb goes into the DLL, not the path of the machine it was built on.
+target_link_options(BulletTracer PRIVATE "/PDBALTPATH:%_PDB%")

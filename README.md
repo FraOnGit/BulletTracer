@@ -18,8 +18,8 @@ at long range.
 
 ## Requirements
 
-- HITMAN World of Assassination (tested on version 3.280.0, Steam).
-- [ZHMModSDK](https://github.com/OrfeasZ/ZHMModSDK/releases) 4.1.1.
+- HITMAN World of Assassination (tested on version 3.290.1, Steam). Older game versions need Bullet Tracer 1.0.1.
+- [ZHMModSDK](https://github.com/OrfeasZ/ZHMModSDK/releases) 4.2.1.
 
 ## Install
 
