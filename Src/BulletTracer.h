@@ -17,7 +17,7 @@
  * Each shot is a ZHM5Projectile of the game's own. Its set-up method (slot 25 of the vtable at Ghidra
  * 0x141e1f6a0) is redirected here for a moment, just to learn the projectile's address; from then on its
  * position is read every frame (+0xf8 of that interface, found by watching its memory in flight) and
- * added to the line until it stops moving. The lines stay until cleared.
+ * added to the line until it stops moving. The lines stay until cleared or evicted by the history limits.
  *
  * Darts and bullets are told apart by speed: a dart flies at about 50 m/s, a bullet many times faster.
  */
@@ -46,6 +46,7 @@ private:
         bool Flying = true;
         float StillTime = 0.f; // Game time without moving: while the game is paused it does not pass.
         float Age = 0.f;       // Game time since the shot.
+        float LastPointAge = 0.f; // Age at the last sampled movement, excluding time spent landed.
         EKind Kind = EKind::Unknown;
     };
 
@@ -53,6 +54,7 @@ private:
     void InstallHook();
     void RemoveHook();
     void UpdateTraces(float p_Delta);
+    void TrimTraces();
     void DrawTraces(IRenderer* p_Renderer);
     void SetInfiniteAmmo();
     bool CreateCrippleBox();

@@ -1,0 +1,222 @@
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <iostream>
+#include <mutex>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+struct SVector3 {
+    float x, y, z;
+    SVector3(float a, float b, float c) : x(a), y(b), z(c) {}
+};
+constexpr uintptr_t kProjectileVTable = 123;
+constexpr int kUpdatePriority = 1;
+// PRODUCTION_CONSTANTS
+
+struct Projectile {
+    uintptr_t VTable = kProjectileVTable;
+    float X = 0.f;
+};
+bool ReadPosition(const void* pointer, uintptr_t vtable, float out[3]) {
+    const auto* projectile = static_cast<const Projectile*>(pointer);
+    if (!projectile || projectile->VTable != vtable) return false;
+    out[0] = projectile->X;
+    out[1] = out[2] = 0.f;
+    return std::isfinite(out[0]);
+}
+
+std::vector<std::string> events;
+struct ZHM5CrippleBox {
+    void Deactivate(int) { events.push_back("deactivate"); }
+};
+struct ZEntityRef {
+    bool Exists = false;
+    ZHM5CrippleBox* Interface = nullptr;
+    explicit operator bool() const { return Exists; }
+    template<class T> T* QueryInterface() const { return Interface; }
+};
+struct SGameUpdateEvent {};
+enum class EUpdateMode { eUpdatePlayMode };
+template<class T, class Signature> struct ZMemberDelegate {
+    ZMemberDelegate(T*, void (T::*)(const SGameUpdateEvent&)) {}
+};
+struct GameLoopManager {
+    template<class T> void UnregisterFrameUpdate(const T&, int, EUpdateMode) {}
+};
+namespace Globals {
+    ::GameLoopManager gameLoop;
+    auto* GameLoopManager = &gameLoop;
+    void* EntityManager = nullptr;
+}
+namespace Functions {
+    struct DeleteEntity {
+        void Call(void*, ZEntityRef, ZEntityRef) { events.push_back("delete"); }
+    } deleteEntity;
+    auto* ZEntityManager_DeleteEntity = &deleteEntity;
+}
+
+class BulletTracer {
+public:
+    // PRODUCTION_TYPES
+    ~BulletTracer();
+    void Classify(Trace&, bool);
+    void UpdateTraces(float);
+    void TrimTraces();
+    void RemoveCrippleBox();
+    void RemoveHook() {}
+    void OnFrameUpdate(const SGameUpdateEvent&) {}
+    uintptr_t m_ModuleDelta = 0;
+    std::mutex m_Mutex;
+    std::vector<void*> m_NewProjectiles;
+    std::vector<Trace> m_Traces;
+    int m_DartsSeen = 0;
+    int m_BulletsSeen = 0;
+    ZEntityRef m_CrippleBoxEntity;
+};
+BulletTracer* g_Instance = nullptr;
+// PRODUCTION_METHODS
+
+void Require(bool condition, const char* message) {
+    if (!condition) throw std::runtime_error(message);
+}
+constexpr float dt = 1.f / 60.f;
+void Start(BulletTracer& tracer, Projectile& projectile) {
+    tracer.m_NewProjectiles.push_back(&projectile);
+    tracer.UpdateTraces(dt);
+}
+
+int main() {
+    int failed = 0;
+    auto test = [&](const char* name, auto run) {
+        try { run(); std::cout << "PASS " << name << '\n'; }
+        catch (const std::exception& error) {
+            ++failed;
+            std::cout << "FAIL " << name << ": " << error.what() << '\n';
+        }
+    };
+    test("unload deactivates before deleting the owned ammo box", [] {
+        ZHM5CrippleBox box;
+        events.clear();
+        { BulletTracer tracer; tracer.m_CrippleBoxEntity = {true, &box}; }
+        Require(events == std::vector<std::string>{"deactivate", "delete"},
+                "owned entity was not deactivated and deleted in order");
+    });
+    test("unload without an ammo box does not delete an entity", [] {
+        events.clear();
+        { BulletTracer tracer; }
+        Require(events.empty(), "unexpected entity operation");
+    });
+    test("cleanup is safe when repeated", [] {
+        ZHM5CrippleBox box;
+        events.clear();
+        { BulletTracer tracer; tracer.m_CrippleBoxEntity = {true, &box};
+          tracer.RemoveCrippleBox(); tracer.RemoveCrippleBox(); }
+        Require(events == std::vector<std::string>{"deactivate", "delete"},
+                "entity cleaned up more than once");
+    });
+    test("moving darts and bullets retain their classification", [] {
+        for (float speed : {48.f, 500.f}) {
+            BulletTracer tracer; Projectile projectile;
+            Start(tracer, projectile);
+            for (int i = 0; i < 10; ++i) {
+                projectile.X += speed * dt; tracer.UpdateTraces(dt);
+            }
+            auto expected = speed == 48.f ? BulletTracer::EKind::Dart : BulletTracer::EKind::Bullet;
+            Require(tracer.m_Traces[0].Kind == expected, "incorrect speed classification");
+            Require(tracer.m_DartsSeen + tracer.m_BulletsSeen == 1, "shot counted more than once");
+        }
+    });
+    test("stationary impact time does not turn a dart into a bullet", [] {
+        BulletTracer tracer; Projectile projectile;
+        Start(tracer, projectile);
+        projectile.X = 48.f * dt; tracer.UpdateTraces(dt);
+        for (int i = 0; i < 40; ++i) tracer.UpdateTraces(dt);
+        Require(tracer.m_Traces[0].Kind == BulletTracer::EKind::Dart, "short dart hidden as bullet");
+        Require(!tracer.m_Traces[0].Flying, "landed trace did not finish");
+    });
+    test("invalidation time does not lower the sampled dart speed", [] {
+        BulletTracer tracer; Projectile projectile;
+        Start(tracer, projectile);
+        projectile.X = 48.f * dt; tracer.UpdateTraces(dt);
+        projectile.VTable = 0; tracer.UpdateTraces(0.2f);
+        Require(tracer.m_Traces[0].Kind == BulletTracer::EKind::Dart, "invalidation diluted speed");
+        Require(!tracer.m_Traces[0].Flying, "invalid projectile still tracked");
+    });
+    test("reuse never appends the next shot to the previous trajectory", [] {
+        for (float delta : {dt, 0.f}) {
+            BulletTracer tracer; Projectile projectile;
+            Start(tracer, projectile);
+            projectile.X = 48.f * dt; tracer.UpdateTraces(dt);
+            const auto oldPoints = tracer.m_Traces[0].Points.size();
+            projectile.X = 20.f;
+            tracer.m_NewProjectiles.push_back(&projectile); tracer.UpdateTraces(delta);
+            Require(tracer.m_Traces.size() == 2, "new shot missing");
+            Require(tracer.m_Traces[0].Points.size() == oldPoints, "spurious segment appended");
+            Require(tracer.m_Traces[0].Kind == BulletTracer::EKind::Dart, "reuse changed old classification");
+            Require(!tracer.m_Traces[0].Flying, "old shot still flying");
+            Require(tracer.m_Traces[1].Points.front().x == 20.f && tracer.m_Traces[1].Age == 0.f,
+                    "new shot did not start at its own position and age");
+        }
+    });
+    test("paused frames do not age or end an in-flight trace", [] {
+        BulletTracer tracer; Projectile projectile;
+        Start(tracer, projectile);
+        for (int i = 0; i < 100; ++i) tracer.UpdateTraces(0.f);
+        Require(tracer.m_Traces[0].Age == 0.f && tracer.m_Traces[0].Flying, "pause ended flight");
+    });
+    test("unmeasurable shots finish without inventing a dart", [] {
+        BulletTracer tracer; Projectile projectile;
+        Start(tracer, projectile);
+        for (int i = 0; i < 40; ++i) tracer.UpdateTraces(dt);
+        Require(tracer.m_Traces[0].Kind == BulletTracer::EKind::Bullet, "stationary point classified as dart");
+        Require(!tracer.m_Traces[0].Flying, "stationary trace never ended");
+    });
+    test("history keeps newest shots and prefers completed traces", [] {
+        BulletTracer tracer;
+        tracer.m_Traces.resize(kMaxTraces + 2);
+        for (size_t i = 0; i < tracer.m_Traces.size(); ++i) tracer.m_Traces[i].Age = float(i);
+        tracer.m_Traces[1].Flying = false;
+        tracer.m_Traces[3].Flying = false;
+        tracer.TrimTraces();
+        Require(tracer.m_Traces.size() == kMaxTraces, "shot budget exceeded");
+        Require(tracer.m_Traces[0].Age == 0.f && tracer.m_Traces[1].Age == 2.f &&
+                tracer.m_Traces[2].Age == 4.f, "wrong traces evicted");
+    });
+    test("point budget evicts completed traces before active ones", [] {
+        BulletTracer tracer;
+        tracer.m_Traces.resize(3);
+        tracer.m_Traces[0].Points.resize(60000, SVector3(0, 0, 0));
+        tracer.m_Traces[1].Points.resize(40000, SVector3(0, 0, 0));
+        tracer.m_Traces[1].Flying = false;
+        tracer.TrimTraces();
+        Require(tracer.m_Traces.size() == 3, "exact point budget should fit");
+        tracer.m_Traces[2].Points.emplace_back(1, 0, 0);
+        tracer.TrimTraces();
+        Require(tracer.m_Traces.size() == 2 && tracer.m_Traces[0].Points.size() == 60000,
+                "point budget did not prefer completed history");
+    });
+    test("active shots cannot bypass either budget", [] {
+        BulletTracer tracer;
+        tracer.m_Traces.resize(kMaxTraces + 1);
+        tracer.m_Traces[0].Age = 42.f;
+        tracer.TrimTraces();
+        Require(tracer.m_Traces.size() == kMaxTraces && tracer.m_Traces[0].Age == 0.f,
+                "oldest active shot not evicted");
+        tracer.m_Traces.back().Points.resize(kMaxStoredPoints + 1, SVector3(0, 0, 0));
+        tracer.TrimTraces();
+        Require(tracer.m_Traces.empty(), "oversized active trace survived");
+        tracer.TrimTraces();
+    });
+    test("paused projectile bursts enforce history limit", [] {
+        BulletTracer tracer;
+        std::vector<Projectile> projectiles(kMaxTraces + 20);
+        for (auto& projectile : projectiles) tracer.m_NewProjectiles.push_back(&projectile);
+        tracer.UpdateTraces(0.f);
+        Require(tracer.m_Traces.size() == kMaxTraces, "burst exceeded limit");
+        Require(tracer.m_Traces.front().Projectile == &projectiles[20], "newest shots not retained");
+        Require(tracer.m_NewProjectiles.empty(), "pending shots not drained");
+    });
+    return failed ? 1 : 0;
+}
