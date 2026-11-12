@@ -2,6 +2,7 @@
 
 #include <Globals.h>
 #include <Hooks.h>
+#include <IconsMaterialDesign.h>
 #include <IRenderer.h>
 #include <Logging.h>
 
@@ -39,6 +40,9 @@ constexpr int kUpdatePriority = 1;
 
 // A point every 2 cm at most, and a shot that has not moved for half a second of game time has landed.
 // Game time, not frames: with the game paused (freecam) a dart in the air stands still but has not landed.
+constexpr size_t kMaxTraces = 500;
+constexpr size_t kMaxStoredPoints = 100000;
+
 constexpr float kMinStep = 0.02f;
 constexpr float kStillSecondsToLand = 0.5f;
 constexpr float kMaxFlightSeconds = 30.f;
@@ -80,6 +84,9 @@ float Distance(const SVector3& a, const SVector3& b) {
 
 BulletTracer::~BulletTracer() {
     RemoveHook();
+
+    // Unloading the mod does not clear the scene; release our active ammo override now.
+    RemoveCrippleBox();
 
     const ZMemberDelegate<BulletTracer, void(const SGameUpdateEvent&)> s_Delegate(this, &BulletTracer::OnFrameUpdate);
     Globals::GameLoopManager->UnregisterFrameUpdate(s_Delegate, kUpdatePriority, EUpdateMode::eUpdatePlayMode);
@@ -182,8 +189,9 @@ void BulletTracer::Classify(Trace& p_Trace, bool p_Final) {
 
     bool s_Dart = false;
 
-    if (p_Trace.Age > 0.f && !p_Trace.Points.empty()) {
-        const float s_Speed = Distance(p_Trace.Points.front(), p_Trace.Points.back()) / p_Trace.Age;
+    if (p_Trace.LastPointAge > 0.f && !p_Trace.Points.empty()) {
+        // Match the elapsed time to the sampled displacement, not to later stationary/invalid frames.
+        const float s_Speed = Distance(p_Trace.Points.front(), p_Trace.Points.back()) / p_Trace.LastPointAge;
         s_Dart = s_Speed >= kMinDartSpeed && s_Speed <= kMaxDartSpeed;
     }
 
@@ -209,6 +217,14 @@ void BulletTracer::UpdateTraces(float p_Delta) {
                 continue;
             }
 
+            // SetUp has already reset reused objects. Never sample the next shot into this line.
+            if (std::find(m_NewProjectiles.begin(), m_NewProjectiles.end(), s_Trace.Projectile) != m_NewProjectiles.end()) {
+                Classify(s_Trace, true);
+                s_Trace.Flying = false;
+                s_Trace.Projectile = nullptr;
+                continue;
+            }
+
             s_Trace.Age += p_Delta;
             float s_Pos[3];
             bool s_Ended = s_Trace.Age > kMaxFlightSeconds || !ReadPosition(s_Trace.Projectile, s_Trace.VTable, s_Pos);
@@ -218,6 +234,7 @@ void BulletTracer::UpdateTraces(float p_Delta) {
 
                 if (s_Trace.Points.empty() || Distance(s_Trace.Points.back(), s_Point) >= kMinStep) {
                     s_Trace.Points.push_back(s_Point);
+                    s_Trace.LastPointAge = s_Trace.Age;
                     s_Trace.StillTime = 0.f;
                 }
                 else {
@@ -234,6 +251,8 @@ void BulletTracer::UpdateTraces(float p_Delta) {
             }
         }
     }
+
+    TrimTraces();
 
     // The new shots, after the others, so they start with no time of their own on the clock.
     for (void* s_Projectile : m_NewProjectiles) {
@@ -257,13 +276,33 @@ void BulletTracer::UpdateTraces(float p_Delta) {
         }
 
         m_Traces.push_back(std::move(s_Trace));
+        TrimTraces();
     }
 
     m_NewProjectiles.clear();
 }
 
+// Called with m_Mutex held. Prefer completed traces, then drop the oldest active
+// trace if necessary so a burst of in-flight shots cannot bypass the budgets.
+void BulletTracer::TrimTraces() {
+    size_t s_Points = 0;
+    for (const auto& s_Trace : m_Traces) {
+        s_Points += s_Trace.Points.size();
+    }
+
+    while (m_Traces.size() > kMaxTraces || s_Points > kMaxStoredPoints) {
+        auto s_Oldest = std::find_if(m_Traces.begin(), m_Traces.end(),
+            [](const Trace& p_Trace) { return !p_Trace.Flying; });
+        if (s_Oldest == m_Traces.end()) {
+            s_Oldest = m_Traces.begin();
+        }
+        s_Points -= s_Oldest->Points.size();
+        m_Traces.erase(s_Oldest);
+    }
+}
+
 void BulletTracer::OnDrawMenu() {
-    if (ImGui::Button("BULLET TRACER")) {
+    if (ImGui::Button(ICON_MD_GPS_FIXED " BULLET TRACER")) {
         m_ShowWindow = !m_ShowWindow;
     }
 }
@@ -289,8 +328,9 @@ void BulletTracer::OnDrawUI(bool p_HasFocus) {
         if (ImGui::Checkbox("Use depth rendering", &m_UseDepth)) {
             SetSettingBool("general", "use_depth", m_UseDepth);
         }
+        ImGui::TextDisabled("On: walls hide traces. Off: traces show through walls.");
 
-        if (ImGui::Checkbox("Trace all shots (off: only darts, as Sieker and tranquilizer)", &m_AllShots)) {
+        if (ImGui::Checkbox("Trace all shots including bullets", &m_AllShots)) {
             SetSettingBool("general", "all_shots", m_AllShots);
         }
 
@@ -314,6 +354,8 @@ void BulletTracer::OnDrawUI(bool p_HasFocus) {
             std::scoped_lock s_Lock(m_Mutex);
             m_Traces.clear();
         }
+
+        ImGui::TextDisabled("History: up to 500 shots / 100,000 points. Old traces expire automatically.");
 
         ImGui::Separator();
 

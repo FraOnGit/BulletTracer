@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Bound trace history to 500 shots and 100,000 points, evicting oldest completed traces first.
+
+- Remove the mod's infinite-ammo override when the mod is unloaded.
+- Finish an old trace before sampling a projectile that has been reused for another shot.
+- Exclude stationary and invalidation frames from measured flight speed, so short dart flights are not hidden
+  as other shots merely because classification happens after impact.
+- Add the SDK crosshair menu icon, clarify depth rendering, and rename the all-shots checkbox.
+- Add portable regression tests for tracing and ammo cleanup.
+
 ## 1.0.2
 
 - Works with the game update 3.290.1 and ZHMModSDK 4.2.1. The update moved the game code the mod hooks, so 1.0.1

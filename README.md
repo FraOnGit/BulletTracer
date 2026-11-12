@@ -9,10 +9,10 @@ at long range.
 
 ## Features
 
-- A permanent line for every dart fired, until you clear it.
-- **Trace all shots**: off (default) draws only darts; on draws every shot the game fires as a projectile.
+- A line for every dart fired, retained until cleared or evicted by the history limits.
+- **Trace all shots including bullets**: off (default) draws only darts; on draws every shot the game fires as a projectile.
 - **Use depth rendering**: lines hidden behind walls (on) or always visible on top (off).
-- **Infinite ammo** toggle, to practice without reloading. It turns off again when you untick it, restart the mission or load a new level.
+- **Infinite ammo** toggle, to practice without reloading. Its override is removed when you untick it, unload the mod through the SDK Mods list, restart the mission or load a new level.
 - Line color, a **Clear the lines** button, and an optional window that stays visible with the mod menu closed.
 - Works with FreeCam
 
@@ -37,8 +37,8 @@ Each shot in the game is a `ZHM5Projectile`. The mod swaps one method of that cl
 up) for its own, which calls the original and only notes the projectile's address. From then on the mod reads the
 projectile's position every frame and adds it to the line, until the projectile stops moving.
 
-Darts and bullets are told apart by their average speed over the first tenth of a second: between 10 and 150 m/s
-it is a dart.
+Darts and bullets are told apart by their average sampled speed during the first tenth of a second: between
+10 and 150 m/s it is a dart. Time spent stationary after landing is excluded from that speed calculation.
 
 ## Troubleshooting
 
@@ -59,6 +59,12 @@ The mod is built inside the ZHMModSDK source tree:
 4. Build the `BulletTracer` target (`cmake --preset x64-Release`, then
    `cmake --build _build/x64-Release --target BulletTracer`).
 
+## Regression tests
+
+Run `python3 tests/run_tests.py` with Python 3 and a GCC/Clang-compatible C++17 compiler available as `c++`
+(or set `CXX`). These portable tests exercise the production tracing and cleanup methods with simulated game
+objects. They do not replace a Windows DLL build or in-game validation. See [tests/README.md](tests/README.md).
+
 ## Credits
 
 - [ZHMModSDK](https://github.com/OrfeasZ/ZHMModSDK) by Orfeas Zafeiris. The infinite ammo follows the way the SDK's
@@ -69,3 +75,9 @@ The mod is built inside the ZHMModSDK source tree:
 ## License
 
 GPL-3.0, the same license as ZHMModSDK. See `LICENSE`.
+
+### Trace history limits
+
+History is limited to 500 shots and 100,000 sampled points across all shots, including hidden traces.
+The oldest completed traces are removed first. If active traces alone exceed a limit, the oldest active
+traces are removed too. This bounds retained geometry and drawing work; it is not an exact byte limit.
